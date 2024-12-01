@@ -17,6 +17,7 @@ return new class extends Migration
             $table->integer('quantity');
             $table->enum('movement', ['entrada', 'salida']);
             $table->mediumText('description')->nullable();
+            $table->date('movement_date');
             $table->timestamps();
             $table->softDeletes('deleted_at');
         });

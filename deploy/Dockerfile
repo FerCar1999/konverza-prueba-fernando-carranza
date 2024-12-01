@@ -1,55 +1,7 @@
-# deploy/Dockerfile
-
-# stage 1: build stage
-FROM php:8.3-fpm-alpine as build
-
-# installing system dependencies and php extensions
-RUN apk add --no-cache \
-    zip \
-    libzip-dev \
-    freetype \
-    libjpeg-turbo \
-    libpng \
-    freetype-dev \
-    libjpeg-turbo-dev \
-    libpng-dev \
-    nodejs \
-    npm \
-    && docker-php-ext-configure zip \
-    && docker-php-ext-install zip pdo pdo_mysql \
-    && docker-php-ext-configure gd --with-freetype=/usr/include/ --with-jpeg=/usr/include/ \
-    && docker-php-ext-install -j$(nproc) gd \
-    && docker-php-ext-enable gd
-
-RUN apk add --no-cache bash
-
-# install composer
-COPY --from=composer:2.7.6 /usr/bin/composer /usr/bin/composer
-
-WORKDIR /var/www/html
-
-# copy necessary files and change permissions
-COPY . .
-RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 777 /var/www/html/storage \
-    && chmod -R 777 /var/www/html/bootstrap/cache
-
-# install php and node.js dependencies
-RUN composer install --no-dev --prefer-dist
-
-# install Laravel Breeze
-RUN composer require laravel/breeze --dev \
-    && php artisan breeze:install blade --dark \
-    && npm install \
-    && npm run build
-
-RUN chown -R www-data:www-data /var/www/html/vendor \
-    && chmod -R 777 /var/www/html/vendor
-
-# stage 2: production stage
+# Base image
 FROM php:8.3-fpm-alpine
 
-# install nginx
+# Installing system dependencies and PHP extensions
 RUN apk add --no-cache \
     zip \
     libzip-dev \
@@ -61,40 +13,46 @@ RUN apk add --no-cache \
     libpng-dev \
     oniguruma-dev \
     gettext-dev \
-    freetype-dev \
+    bash \
     nginx \
     && docker-php-ext-configure zip \
     && docker-php-ext-install zip pdo pdo_mysql \
     && docker-php-ext-configure gd --with-freetype=/usr/include/ --with-jpeg=/usr/include/ \
     && docker-php-ext-install -j$(nproc) gd \
     && docker-php-ext-enable gd \
-    && docker-php-ext-install bcmath \
-    && docker-php-ext-enable bcmath \
-    && docker-php-ext-install exif \
-    && docker-php-ext-enable exif \
-    && docker-php-ext-install gettext \
-    && docker-php-ext-enable gettext \
-    && docker-php-ext-install opcache \
-    && docker-php-ext-enable opcache \
-    && rm -rf /var/cache/apk/*
+    && docker-php-ext-install bcmath exif gettext opcache \
+    && docker-php-ext-enable bcmath exif gettext opcache
 
-RUN apk add --no-cache bash
-
-# install composer
+# Install Composer
 COPY --from=composer:2.7.6 /usr/bin/composer /usr/bin/composer
-
-# copy files from the build stage
-COPY --from=build /var/www/html /var/www/html
-COPY ./deploy/nginx.conf /etc/nginx/http.d/default.conf
-COPY ./deploy/php.ini "$PHP_INI_DIR/conf.d/app.ini"
 
 WORKDIR /var/www/html
 
-# Establece permisos para los directorios necesarios
+# Copy application files
+COPY . .
+
+# Permissions setup
+RUN chown -R www-data:www-data /var/www/html \
+    && chmod -R 777 /var/www/html/storage \
+    && chmod -R 777 /var/www/html/bootstrap/cache
+
+# Install PHP and Node.js dependencies
+RUN composer install --no-dev --prefer-dist \
+    && composer require laravel/breeze --dev \
+    && php artisan breeze:install blade --dark \
+    && apk add --no-cache nodejs npm \
+    && npm install \
+    && npm run build
+
+# Configurations for nginx and PHP
+COPY ./deploy/nginx.conf /etc/nginx/http.d/default.conf
+COPY ./deploy/php.ini "$PHP_INI_DIR/conf.d/app.ini"
+
+# Ensure permissions
 RUN chmod -R 777 storage bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache
 
-# add all folders where files are being stored that require persistence. if needed, otherwise remove this line.
+# Persistent storage (if required)
 VOLUME ["/var/www/html/storage/app"]
 
 CMD ["sh", "-c", "nginx && php-fpm"]
